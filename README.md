@@ -3,6 +3,7 @@ Scripts and configration to build Magic3 environment
 
 Easily build Magic3 environment by Vagrant
 
+## Description
 
 ## Requirement
 
@@ -16,7 +17,11 @@ https://www.vagrantup.com/downloads.html
 
 ## Usage
 
-make work directory
-copy Vagrantfile
-vagrant up
+1.make work directory
+    $ mkdir dirname
+1.copy Vagrantfile
+    $ cd dirname
+    $ cp Vagrantfile ./
+1.vagrant up
+    $ vagrant up
 
