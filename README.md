@@ -7,11 +7,13 @@ Easily build Magic3 environment by Vagrant
 auto generating the below environment by shell sciript in Vagrantfile
 
 1. Create LAMP environment
-1. Create database
+1. Create database for sample
 1. Download the latest Magic3 source archive
 
 
 ## Requirement
+
+Vagrant is required.
 
 - VirtualBox
 
@@ -27,13 +29,13 @@ https://www.vagrantup.com/downloads.html
 
     $ mkdir dirname
 
-1. copy Vagrantfile
+1. copy Vagrantfile in work directory
 
     $ cd dirname
     
     $ cp Vagrantfile ./
 
-1. vagrant up
+1. start building
 
     $ vagrant up
 
