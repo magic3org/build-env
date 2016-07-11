@@ -1,0 +1,75 @@
+VAGRANTFILE_API_VERSION = "2"
+
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|  
+  config.vm.box = "bento/centos-7.2"
+  config.vm.network :forwarded_port, guest:22, host:22, id:"ssh"
+  config.vm.network :forwarded_port, guest:80, host:80, id:"http"
+  
+  config.vm.provider "virtualbox" do |vb|
+    # Customize the amount of memory on the VM:
+    vb.memory = "1024"
+  end
+  # Enable provisioning with a shell script. Additional provisioners such as
+  config.vm.provision "shell", inline: <<-SHELL
+    DB_ROOT_USER='root'
+    DB_ROOT_PWD=''
+    DB_USER='vagrant'
+    DB_PWD='vagrant'
+    DB_NAME='magic3db'
+    GITHUB_USER="magic3org"
+    GITHUB_REPO="magic3"
+    FILENAME_HEAD="magic3_"
+
+    yum update
+    yum -y install httpd mariadb-server php php-mysql php-mbstring php-gd
+    
+    # MySQL Configration
+    sed -i -e "10i character_set_server=utf8" /etc/my.cnf
+    sed -i -e "11i [mysql]" /etc/my.cnf
+    sed -i -e "12i default-character-set=utf8" /etc/my.cnf
+    sed -i -e "13i [mysqldump]" /etc/my.cnf
+    sed -i -e "14i default-character-set=utf8" /etc/my.cnf
+    
+    chkconfig httpd on
+    chkconfig mariadb on
+    service httpd start
+    service mariadb start
+    
+    # Create database
+    mysql --host=localhost --user=${DB_ROOT_USER} --password=${DB_ROOT_PWD} << _END_
+    CREATE USER ${DB_USER}@localhost IDENTIFIED BY '${DB_PWD}';
+    GRANT USAGE ON *.* TO ${DB_USER}@localhost IDENTIFIED BY '${DB_PWD}';
+    CREATE DATABASE IF NOT EXISTS ${DB_NAME} DEFAULT CHARACTER SET utf8 COLLATE utf8_unicode_ci;
+    GRANT ALL PRIVILEGES ON *.* TO ${DB_USER}@localhost;
+    FLUSH PRIVILEGES;
+_END_
+
+    # Get latest Magic3 source
+    url=`curl -s "https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/tags" | grep "tarball_url" | sed -n '/[ \t]*"tarball_url"/p' | head -n 1 | awk '{print $2}' | sed -e 's/^[ "]*//' -e 's/[ ",]*$//'`
+    version=`basename $url | sed -e 's/v\([0-9\.]*\)/\1/'`
+    filename=${FILENAME_HEAD}${version}.tar.gz
+    echo 'Download the latest Magic3 archive...'
+    echo $url
+    curl -s -o $filename -L $url
+    # Extract
+    destdir=`tar tzf $filename | head -n 1`
+    destdirname=`basename $destdir`
+    tar xzf $filename
+    chown -R apache:apache $destdirname
+    rm -rf /var/www/html
+    mv $destdirname /var/www/html
+    cd /var/www/html
+    find ./ -type f -name ".gitkeep" -delete
+
+    # Completed
+    echo ''
+    echo '######################################'
+    echo 'Building envirionment is completed.'
+    echo 'Access the url and finish Magic3 installer. http://localhost/'
+    echo ''
+    echo 'Database connect information'
+    echo ' db:' ${DB_NAME}
+    echo ' db user:' ${DB_USER}
+    echo ' db password:' ${DB_PWD}
+  SHELL
+end
