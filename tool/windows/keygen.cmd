@@ -36,12 +36,14 @@ set KEYFILE=%KEY_DIR%\%KEY_FILENAME%
 set SSH_CONFIG=%USERPROFILE%\.ssh\config
 set TERATERM_FILE=%DEVELOP_DIR%\%TERATERM_DIRNAME%\%SERVICE_NAME%_%SERVER_ID%^(%IP%^).ttl
 
-:: ファイルが存在する場合は終了
+:: キーファイルが存在する場合は終了
 if exist %KEYFILE% (
 	echo エラー: キーファイル^(%KEYFILE%^)が存在します
 	exit
 )
 
+:: ディレクトリ作成
+mkdir %KEY_DIR%
 echo %KEYFILE%
 ssh-keygen -f %KEYFILE% -t rsa -N "" -C %USER%@%IP%
 
@@ -54,7 +56,7 @@ echo   Port 22
 echo   UserKnownHostsFile /dev/null
 echo   StrictHostKeyChecking no
 echo   PasswordAuthentication no
-echo   IdentityFile "%SSH_KEY_DIR%\%KEY_FILENAME%"
+echo   IdentityFile "%KEY_DIR%\%KEY_FILENAME%"
 echo   IdentitiesOnly yes
 echo   LogLevel FATAL
 ) >> %SSH_CONFIG%
@@ -68,7 +70,7 @@ echo ; 機能：秘密鍵を使用してSSH接続する
 echo ;============================================ 
 echo username = 'root'
 echo hostname = '%IP%'
-echo keyfile = '"%SSH_KEY_DIR%\%KEY_FILENAME%"'
+echo keyfile = '"%KEY_DIR%\%KEY_FILENAME%"'
 echo ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 echo msg = hostname
 echo strconcat msg ':22 /ssh /2 /auth=publickey /user='
