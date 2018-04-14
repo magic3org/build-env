@@ -21,7 +21,6 @@ if "%2"=="" (
 echo キー作成開始...
 
 :: 要定義パラメータ
-set USER=root
 set SERVICE_NAME=さくらVPS
 set SERVICE_NAME_HEAD=sakura_vps_
 set TERATERM_DIRNAME=サーバ接続
@@ -31,6 +30,7 @@ set KEY_DIR=%DEVELOP_DIR%\key\keys
 :: その他パラメータ
 set SERVER_ID=%1%
 set IP=%2%
+set USER=root
 set KEY_FILENAME=%SERVICE_NAME_HEAD%%SERVER_ID%_%IP%
 set KEYFILE=%KEY_DIR%\%KEY_FILENAME%
 set SSH_CONFIG=%USERPROFILE%\.ssh\config
