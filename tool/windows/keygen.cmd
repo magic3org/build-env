@@ -34,7 +34,8 @@ set USER=root
 set KEY_FILENAME=%SERVICE_NAME_HEAD%%SERVER_ID%_%IP%
 set KEYFILE=%KEY_DIR%\%KEY_FILENAME%
 set SSH_CONFIG=%USERPROFILE%\.ssh\config
-set TERATERM_FILE=%DEVELOP_DIR%\%TERATERM_DIRNAME%\%SERVICE_NAME%_%SERVER_ID%^(%IP%^).ttl
+set TERATERM_DIR=%DEVELOP_DIR%\%TERATERM_DIRNAME%
+set TERATERM_FILE=%TERATERM_DIR%\%SERVICE_NAME%_%SERVER_ID%^(%IP%^).ttl
 
 :: キーファイルが存在する場合は終了
 if exist %KEYFILE% (
@@ -42,7 +43,7 @@ if exist %KEYFILE% (
 	exit
 )
 
-:: ディレクトリ作成
+:: キーファイル作成
 mkdir %KEY_DIR%
 echo %KEYFILE%
 ssh-keygen -f %KEYFILE% -t rsa -N "" -C %USER%@%IP%
@@ -63,6 +64,7 @@ echo   LogLevel FATAL
 echo SSH定義ファイル^(%SSH_CONFIG%^)を更新しました
 
 :: TeraTerm用設定ファイル追加
+mkdir %TERATERM_DIR%
 (
 echo ;============================================ 
 echo ; サーバ接続用スクリプト
