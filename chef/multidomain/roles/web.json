@@ -1,0 +1,34 @@
+{
+  "name": "web",
+  "description": "This is a web application role defined as JSON",
+  "chef_type": "role",
+  "json_class": "Chef::Role",
+  "default_attributes": {
+  },
+  "override_attributes": {
+  },
+  "run_list": [
+    "recipe[selinux::disabled]",
+    "recipe[base::prepare]",
+    "recipe[magic3-env::prepare]",
+
+    "recipe[perl]",
+    "recipe[apache2]",
+    "recipe[apache2::mod_ssl]",
+    "recipe[apache2::mod_php]",
+    "recipe[apache2::mod_cgi]",
+    "recipe[apache2::mod_include]",
+    "recipe[apache2::mod_rewrite]",
+    "recipe[apache2::mod_vhost_alias]",
+
+    "recipe[mariadb::server]",
+    "recipe[mariadb::client]",
+    "recipe[ntp]",
+    "recipe[sysstat]",
+    "recipe[openssh]",
+
+    "recipe[base]",
+    "recipe[magic3-env]",
+    "recipe[magic3-env::createadmin]"
+  ]
+}
