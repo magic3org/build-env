@@ -28,7 +28,6 @@
     "recipe[openssh]",
 
     "recipe[base]",
-    "recipe[magic3-env]",
-    "recipe[magic3-env::createadmin]"
+    "recipe[magic3-env]"
   ]
 }
