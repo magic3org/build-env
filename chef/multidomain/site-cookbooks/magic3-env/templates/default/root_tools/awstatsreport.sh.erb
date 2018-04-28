@@ -1,0 +1,49 @@
+#!/bin/bash
+
+site=$1
+dir=$2
+DirData="<%= node['magic3-env']['awstats_dir'] %>/data"
+BUILDPROG="/usr/bin/awstats_buildstaticpages.pl"
+AWSTATSPROG="<%= node['magic3-env']['awstats_dir'] %>/<%= node['magic3-env']['awstats_prog'] %>"
+
+reportbuild() {
+    # AWStatsデータベース更新中断時ロックファイル残存対処(ここから)
+    if [ -f /tmp/awstats.$site.lock ]; then
+        ps -p `cat /tmp/awstats.$site.lock |awk '{print $6}'`
+        if [ $? -ne 0 ]; then
+            echo /tmp/awstats.$site.lock removed >&2
+            rm -f /tmp/awstats.$site.lock 
+        fi
+    fi
+    # AWStatsデータベース更新中断時ロックファイル残存対処(ここまで)
+    ${BUILDPROG} \
+    -awstatsprog="${AWSTATSPROG}" \
+    -config=$site -update -lang=jp -dir=$dir \
+    -year=$YEAR -month=$MONTH -builddate=$YEAR$MONTH
+    # 個別ページリンク切れ対処(ここから)
+    sed -i "s/href=\"${site}/href=\"awstats.${site}/g" \
+    $dir/awstats.$site.$YEAR$MONTH.html
+    # 個別ページリンク切れ対処(ここまで)
+    if [ "$YEAR$MONTH" = $(date +%Y%m) ]; then
+        mv $dir/awstats.$site.$YEAR$MONTH.html $dir/index.html
+    else
+        mv $dir/awstats.$site.$YEAR$MONTH.html $dir/$YEAR$MONTH.html
+    fi
+}
+
+ls $dir/* > /dev/null 2>&1
+if [ $? -eq 0 ]; then
+    YEAR=`date --date '1 days ago' +%Y`
+    MONTH=`date --date '1 days ago' +%m`
+    reportbuild
+else
+#    DirData=`grep ^DirData /etc/awstats/awstats.model.conf|awk -F= '{print $2}'|tr -d \"`
+#for log in `ls $DirData/awstats*.$site.txt`
+    for log in `ls $DirData/$site/awstats*.$site.txt`
+    do
+        YEAR=`echo $log|cut -d / -f 5|cut -d . -f 1|sed -e 's/awstats..\([^ ]*\)/\1/p' -e d`
+        MONTH=`echo $log|cut -d / -f 5|cut -d . -f 1|sed -e 's/awstats\([^ ]*\)..../\1/p' -e d`
+        reportbuild
+    done
+fi
+

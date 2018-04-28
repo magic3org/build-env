@@ -1,0 +1,11 @@
+#!/bin/sh
+
+AWSTATSPROG="<%= node['magic3-env']['awstats_dir'] %>/<%= node['magic3-env']['awstats_prog'] %>"
+
+logfile=`grep ^LogFile /etc/awstats/awstats.$1.conf|sed -e 's/LogFile="\([^ ]*\)"/\1/p' -e d`
+for log in `ls $logfile*|sort -r`
+do
+    ${AWSTATSPROG} \
+    -config=$1 -update -logfile=$log
+done
+

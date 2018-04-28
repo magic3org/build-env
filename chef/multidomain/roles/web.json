@@ -24,7 +24,6 @@
     "recipe[mariadb::server]",
     "recipe[mariadb::client]",
     "recipe[ntp]",
-    "recipe[sysstat]",
     "recipe[openssh]",
 
     "recipe[base]",

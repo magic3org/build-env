@@ -1,0 +1,132 @@
+#!/bin/bash
+#
+# ドメイン削除スクリプトv1.0
+#
+# ライセンス    http://www.gnu.org/copyleft/gpl.html  GPL License
+#
+# 履歴
+# v1.0 初回リリース(2018/4/27)
+#************************************************************
+
+# コマンドが0以外で終了した場合、即座にスクリプトを終了
+set -e
+
+#****************************************************
+#
+# 変数宣言
+#
+#****************************************************
+DOMAINNAME="$1"
+MAILTOUSER="$2"
+TOOLS_DIR_NAME="tools"
+AWSTATS_DIR_NAME="awstats"
+VHOST_DIR="/etc/httpd/sites-available"
+# サーバ情報
+# Eメール
+MAILTO='<%= node['magic3-env']['mailto'] %>'
+SUBJECT='Site Information [deleted]'
+# DB
+DB_ROOT_USER="root"
+DB_ROOT_PWD="<%= node['mariadb']['server_root_password'] %>"
+
+# 実行ユーザチェック
+USERID=`id | sed 's/uid=\([0-9]*\)(.*/\1/'`
+if [ $USERID -ne 0 ]
+then
+    echo "エラー: rootユーザ以外では実行できません"
+    exit 1
+fi
+
+#****************************************************
+#
+# 引数チェックし、ドメイン名、ユーザ名を決定する
+# 引数1:ドメイン名、引数2:メール送信先
+#
+#****************************************************
+if [ -z "${DOMAINNAME}" ] ; then
+    echo "エラー: ドメイン名を入力してください。[書式] removedomain ドメイン名 メール送信先"
+    exit 1
+fi
+filepath=${VHOST_DIR}/vhost-${DOMAINNAME}
+if [ ! -e ${filepath} ]; then
+    echo "エラー: ドメインが存在しません"
+    exit 1
+fi
+
+# ユーザ名取得
+username=`sed -n '/^[ \n\r\f\t]*DocumentRoot/p' ${filepath} | head -1 | sed -e 's/.*DocumentRoot[ \n\r\f\t]*\/home\/\(.*\)\/public_html[ \n\r\f\t]*/\1/'`
+if [ -z "${username}" ] ; then
+    echo "エラー: ユーザ名が取得できません"
+    exit 1
+fi
+
+#****************************************************
+#
+# ドメイン削除
+#
+#****************************************************
+DOMAINNAME_ESC=`echo ${DOMAINNAME} | sed -e 's/\./\\\\./g'`
+DB_NAME="${username}_db"
+DB_USER="${username}"
+
+# ホストを非公開
+/usr/sbin/a2dissite vhost-${DOMAINNAME}
+
+# Apache設定ファイル再読み込み
+/usr/sbin/apachectl -t >&/dev/null
+if [ "$?" -eq 0 ] ; then
+    /usr/sbin/apachectl graceful >&/dev/null
+    echo "ドメインを非公開にしました: "${DOMAINNAME}
+fi
+
+# Apacheドメイン設定ファイル削除
+rm -f ${VHOST_DIR}/vhost-${DOMAINNAME}
+
+# クーロン設定削除
+sed -i -e '/\s\+'${DOMAINNAME_ESC}'\s\+/d' <%= node['magic3-env']['awstats_cron_conf'] %>
+#grep -q "/home/${username}/" <%= node['magic3-env']['awstats_cron_conf'] %>
+#if [ "$?" -ne 0 ] ; then
+#    echo "設定ファイルにエラーがあります: ""<%= node['magic3-env']['awstats_cron_conf'] %>"
+#fi
+
+# バッチ処理設定ファイル削除
+rm -f /etc/awstats/awstats.${DOMAINNAME}.conf
+
+# Webログ削除
+rm -f /var/log/httpd/${DOMAINNAME}-<%= node['magic3-env']['vhost_error_log'] %>*
+rm -f /var/log/httpd/${DOMAINNAME}-<%= node['magic3-env']['vhost_access_log'] %>*
+
+# DB削除
+mysql --host=localhost --user=${DB_ROOT_USER} --password=${DB_ROOT_PWD} << _END_
+DROP DATABASE ${DB_NAME};
+_END_
+echo "DBを削除しました: "${DB_NAME}
+
+# ユーザ削除
+/usr/sbin/userdel -r ${username}
+echo "ユーザを削除しました: "${username}
+
+cat << _EOT_
+ドメイン削除完了しました
+Deleted Site Info ======================
+
+URL              : http://${DOMAINNAME}
+
+========================================
+_EOT_
+
+# メール送信
+if [ -z "${MAILTOUSER}" ] ; then
+    param="${MAILTO}"
+else
+    param="-b ${MAILTO} ${MAILTOUSER}"
+fi
+mail -s "${SUBJECT} - ${DOMAINNAME}" $param <<EOT
+Deleted Site Info ======================
+
+URL              : http://${DOMAINNAME}
+
+========================================
+EOT
+
+exit 0

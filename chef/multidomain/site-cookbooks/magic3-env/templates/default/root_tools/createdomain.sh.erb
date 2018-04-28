@@ -1,0 +1,444 @@
+#!/bin/bash
+#
+# ドメイン作成スクリプト v1.0
+#
+# ライセンス    http://www.gnu.org/copyleft/gpl.html  GPL License
+#
+# 履歴
+# v1.0 初回リリース(2018/4/27)
+#************************************************************
+
+#****************************************************
+#
+# [コマンド引数仕様]
+# 引数1:ドメイン名、引数2(省略可):メール送信先、引数3(省略可):ユーザ名
+# ドメイン名の前に「admin:」を付けるとサーバ管理サイトを作成
+#
+#****************************************************
+
+# コマンドが0以外で終了した場合、即座にスクリプトを終了
+set -e
+
+#****************************************************
+#
+# 変数宣言
+#
+#****************************************************
+ADMIN_SERVER_MODE="false"
+DOMAINNAME="$1"
+MAILTOUSER="$2"
+USERNAME="$3"
+MAGIC3_ARC_DIR="<%= node['magic3-env']['magic3_arc_dir'] %>"
+MAGIC3_DIR_NAME="magic3"
+PUBLIC_DIR_NAME="public_html"
+TOOLS_DIR_NAME="tools"
+SERVER_TOOLS_DIR_NAME="stools"
+AWSTATS_DIR_NAME="awstats"
+MAGIC3_INSTALL_DEF_PATH="include/install/installDef.php"
+VHOST_DIR="<%= node['apache']['dir'] %>/sites-available"
+# サーバ情報
+SERVER_ID='<%= node['magic3-env']['server_name'] %>'
+# Eメール
+MAILTO='<%= node['magic3-env']['mailto'] %>'
+SUBJECT='Site Information'
+# DB
+DB_ROOT_USER="root"
+DB_ROOT_PWD="<%= node['mariadb']['server_root_password'] %>"
+
+# 実行ユーザチェック
+USERID=`id | sed 's/uid=\([0-9]*\)(.*/\1/'`
+if [ $USERID -ne 0 ]
+then
+    echo "エラー: rootユーザ以外では実行できません"
+    exit 1
+fi
+
+# コマンド存在チェック
+if ! type -P mkpasswd >/dev/null ; then
+    echo "エラー: mkpasswdコマンドが存在しません"
+    echo "インストールしてください"
+    exit 1
+fi
+if ! type -P wget >/dev/null ; then
+    echo "エラー: wgetコマンドが存在しません"
+    echo "インストールしてください"
+    exit 1
+fi
+
+# ソース存在チェック
+if [ -z "$(ls -A ${MAGIC3_ARC_DIR})" ] ; then
+    echo "エラー: Magic3ソースアーカイブが存在しません"
+    echo "ディレクトリ: "${MAGIC3_ARC_DIR}
+    exit 1
+fi
+
+#****************************************************
+#
+# 引数チェックし、ドメイン名、ユーザ名を決定する
+#
+#****************************************************
+# 引数が1つもなかったらエラーを返す
+if [ -z "$DOMAINNAME" ] ; then
+    echo "エラー: ドメイン名を入力してください。[書式] createdomain ドメイン名 (メール送信先) (ユーザ名)"
+    
+    echo "ドメイン一覧: "
+    files=${VHOST_DIR}"/vhost-*"
+    for filepath in ${files}
+    do
+        hostname=`sed -n '/[^#][ \n\r\f\t]*ServerName/p' ${filepath} | sed -e 's/.*ServerName[ \n\r\f\t]*\(.*\)[ \n\r\f\t]*/\1/'`
+        username=`sed -n '/[^#][ \n\r\f\t]*DocumentRoot/p' ${filepath} | sed -e 's/.*DocumentRoot[ \n\r\f\t]*\/home\/\(.*\)\/public_html[ \n\r\f\t]*/\1/'`
+        echo ${hostname} - ${username}
+    done
+    exit 1
+fi
+
+if [ -z "$USERNAME" ] ; then
+    for count in {1..10}
+    do
+        # ユーザ名がない場合は自動生成
+        TMPNAME=${SERVER_ID}${DOMAINNAME:0:2}`mkpasswd -l 4 -d 4 -c 0 -C 0 -s 0`
+
+        # ユーザー名が重複していないか確認
+        for user in `cat /etc/passwd | cut -d: -f 1`
+        do
+            if [ "$TMPNAME" = "$user" ]; then
+                TMPNAME=""
+                break
+            fi
+        done
+        if [ -n "$TMPNAME" ] ; then
+            # ユーザー名と既存のディレクトリ名が重複していないか確認
+            for dir in `ls /home`
+            do
+                if [ "$TMPNAME" = "$dir" ]; then
+                    TMPNAME=""
+                    break
+                fi
+            done
+        fi
+
+        # エラーなしの場合は終了
+        if [ -n "$TMPNAME" ] ; then
+            USERNAME="${TMPNAME}"
+            break
+        fi
+    done
+    if [ -z "$USERNAME" ] ; then
+        echo "エラー: ユーザ名が生成できません"
+        exit 1
+    fi
+else
+    # ユーザー名が重複していないか確認
+    # 重複している場合はエラーを返す
+    for user in `cat /etc/passwd | cut -d: -f 1`
+    do
+        if [ "$USERNAME" = "$user" ]; then
+            echo "エラー: ユーザが既に存在しています"
+            exit 1
+        fi
+    done
+
+    # ユーザー名と既存のディレクトリ名が重複していないか確認
+    # 重複している場合はエラーを返す
+    for dir in `ls /home`
+    do
+        if [ "$USERNAME" = "$dir" ]; then
+            echo "エラー: ユーザディレクトリが既に存在しています"
+            exit 1
+        fi
+    done
+
+    # ユーザー名の文字数を確認
+    # 32文字を超えていたらエラーを返す
+    if [ "${#USERNAME}" -gt 32 ]; then
+        echo "エラー: ユーザ名が32文字を超えています"
+        exit 1
+    fi
+
+    # ユーザー名に使用された文字を確認
+    # 不正な文字を使用していたらエラーを返す
+    echo $USERNAME
+    if expr $USERNAME : [^a-zA-Z0-9_-] >/dev/null ; then
+        echo "エラー: ユーザ名に不正な文字が含まれています"
+        exit 1
+    fi
+fi
+# ドメイン存在チェック
+if [ -e ${VHOST_DIR}/vhost-${DOMAINNAME}.conf ]; then
+    echo "エラー: ドメインは既に存在します"
+    
+    echo "ドメイン一覧: "
+    files=${VHOST_DIR}"/vhost-*"
+    for filepath in ${files}
+    do
+        hostname=`sed -n '/[^#][ \n\r\f\t]*ServerName/p' ${filepath} | sed -e 's/.*ServerName[ \n\r\f\t]*\(.*\)[ \n\r\f\t]*/\1/'`
+        username=`sed -n '/[^#][ \n\r\f\t]*DocumentRoot/p' ${filepath} | sed -e 's/.*DocumentRoot[ \n\r\f\t]*\/home\/\(.*\)\/public_html[ \n\r\f\t]*/\1/'`
+        echo ${hostname} - ${username}
+    done
+    exit 1
+fi
+
+#
+# 変数初期化
+#
+#IP_ADDRESS=`hostname -i`
+#IP_ADDRESS=`/sbin/ifconfig eth0 | awk '/inet / {print $2}' | awk -F: '{print $2}'`
+# CentOS7用に取得方法を変更
+#IP_ADDRESS=`/sbin/ip addr | grep 'state UP' -A2 | tail -n1 | awk '{print $2}' | cut -f1  -d'/'`
+# さくらインターネットVPSに対応
+IP_ADDRESS=`hostname  -I | awk -F" " '{print $1}'`
+DB_NAME="${USERNAME}_db"
+#DB_NAME2="${USERNAME}\\_db"
+DB_NAME2=`echo ${DB_NAME} | sed -e 's/_/\\\\_/g'`
+DB_USER="${USERNAME}"
+DB_PWD=`mkpasswd -l 6 -d 6 -c 0 -C 0 -s 0`
+SERVER_TOOLS_USER="${USERNAME}_ssl"
+SERVER_TOOLS_PWD=`mkpasswd -s 0 -l 8`
+
+# useraddコマンドで新規ユーザーを作成
+/usr/sbin/useradd -s /bin/false ${USERNAME}
+echo "ユーザ(ログイン不可ユーザ)を作成しました"
+
+# 新規に作成されたディレクトリの権限を775に変更します
+chmod 775 /home/${USERNAME}/
+
+# ユーザ作成のみの場合はここで終了
+#exit 0
+
+# サーバ管理ツールへのアクセス制御ファイル作成
+if [ "$ADMIN_SERVER_MODE" = "true" ] ; then
+  htpasswd -b -c <%= node['apache']['dir'] %>/conf/passwd_ssl ${SERVER_TOOLS_USER} ${SERVER_TOOLS_PWD} >&/dev/null
+fi
+
+# ツールディレクトリ作成
+mkdir /home/${USERNAME}/${TOOLS_DIR_NAME}
+htpasswd -b -c /home/${USERNAME}/${TOOLS_DIR_NAME}/.htpasswd ${USERNAME} ${DB_PWD} >&/dev/null
+cat <<_EOT_ > /home/${USERNAME}/${TOOLS_DIR_NAME}/.htaccess
+AuthType      Basic
+AuthName      "Access Limited Area"
+AuthUserFile  /home/${USERNAME}/${TOOLS_DIR_NAME}/.htpasswd
+AuthGroupFile /dev/null
+Require       valid-user
+_EOT_
+
+# Awstatsの環境作成
+mkdir /home/${USERNAME}/${TOOLS_DIR_NAME}/${AWSTATS_DIR_NAME}
+ln -s <%= node['magic3-env']['awstats_dir'] %>/icon /home/${USERNAME}/${TOOLS_DIR_NAME}/${AWSTATS_DIR_NAME}/icon
+
+# Awstatsバッチ処理の登録
+mkdir -p <%= node['magic3-env']['awstats_dir'] %>/data/${DOMAINNAME}
+sed -e 's/\$HOSTNAME\$'"/${DOMAINNAME}/g" <%= node['magic3-env']['magic3_tools_dir'] %>/template/awstats.model.conf > /etc/awstats/awstats.${DOMAINNAME}.conf
+echo "00 00 * * * root <%= node['magic3-env']['magic3_tools_dir'] %>/awstatsreport.sh ${DOMAINNAME} /home/${USERNAME}/${TOOLS_DIR_NAME}/${AWSTATS_DIR_NAME} > /dev/null" >> <%= node['magic3-env']['awstats_cron_conf'] %>
+
+# Magic3ソースの解凍
+cd /home/${USERNAME}
+
+# ファイルコピー
+files=${MAGIC3_ARC_DIR}"/*"
+for filepath in ${files}
+do
+    filename=`basename ${filepath}`
+#    echo ${filename}" を解凍します"
+    break
+done
+
+# 解凍されたディレクトリ名取得
+destdir=`tar tzf ${filepath} | head -n 1`
+destdirname=`basename $destdir`
+
+cp ${filepath} ./
+tar xzf ${filename}
+find ./ -type f -name ".gitkeep" -delete
+echo ${filename}" を解凍しました"
+
+# 存在するサイトを移動
+if [ -d $PUBLIC_DIR_NAME ]; then
+mv $PUBLIC_DIR_NAME _$PUBLIC_DIR_NAME
+fi
+
+# インストール定義ファイル作成
+if [ "$ADMIN_SERVER_MODE" = "true" ] ; then
+cat <<_EOT_ > $destdirname/${MAGIC3_INSTALL_DEF_PATH}
+<?php
+define('M3_INSTALL_ADMIN_SERVER', ${ADMIN_SERVER_MODE});
+define('M3_INSTALL_PRE_FIXED_DB', true);
+define('M3_INSTALL_DOMAIN_NAME',  '${DOMAINNAME}');
+define('M3_INSTALL_DB_NAME',      '${DB_NAME}');
+define('M3_INSTALL_DB_USER',      '${DB_USER}');
+define('M3_INSTALL_DB_PASSWORD',  '${DB_PWD}');
+define('M3_INSTALL_SERVER_TOOL_USER',      '${SERVER_TOOLS_USER}');
+define('M3_INSTALL_SERVER_TOOL_PASSWORD',  '${SERVER_TOOLS_PWD}');
+?>
+_EOT_
+
+else
+
+cat <<_EOT_ > $destdirname/${MAGIC3_INSTALL_DEF_PATH}
+<?php
+define('M3_INSTALL_ADMIN_SERVER', ${ADMIN_SERVER_MODE});
+define('M3_INSTALL_PRE_FIXED_DB', true);
+define('M3_INSTALL_DOMAIN_NAME',  '${DOMAINNAME}');
+define('M3_INSTALL_DB_NAME',      '${DB_NAME}');
+define('M3_INSTALL_DB_USER',      '${DB_USER}');
+define('M3_INSTALL_DB_PASSWORD',  '${DB_PWD}');
+?>
+_EOT_
+fi
+
+# Magic3ソースディレクトリを移動
+#mv $MAGIC3_DIR_NAME $PUBLIC_DIR_NAME
+mv $destdirname $PUBLIC_DIR_NAME
+chown -R <%= node['apache']['user'] %>:<%= node['apache']['group'] %> $PUBLIC_DIR_NAME
+
+# クリーンアップ
+rm -rf ${filename}
+
+echo "Magic3の解凍終了しました"
+
+#****************************************************
+#
+# サイトの定義ファイルを作成
+# サイト種別(サーバ管理サイトまたは通常サイト)で異なる
+#
+#****************************************************
+### バーチャルホストの設定ファイルを新規に作成
+if [ "$ADMIN_SERVER_MODE" = "true" ] ; then
+
+cat <<_EOT_ > ${VHOST_DIR}/vhost-${DOMAINNAME}.conf
+<VirtualHost *:80>
+    ServerName          ${DOMAINNAME}
+    DocumentRoot /home/${USERNAME}/${PUBLIC_DIR_NAME}
+
+    ServerAdmin webmaster@${DOMAINNAME}
+    ErrorLog <%= node['apache']['log_dir'] %>/${DOMAINNAME}-<%= node['magic3-env']['vhost_error_log'] %>
+    CustomLog <%= node['apache']['log_dir'] %>/${DOMAINNAME}-<%= node['magic3-env']['vhost_access_log'] %> combined
+
+    Alias /${TOOLS_DIR_NAME} "/home/${USERNAME}/${TOOLS_DIR_NAME}"
+</VirtualHost>
+<Directory "/home/${USERNAME}">
+AllowOverride All
+Require all granted
+</Directory>
+_EOT_
+
+else
+
+cat <<_EOT_ > ${VHOST_DIR}/vhost-${DOMAINNAME}.conf
+<VirtualHost *:80>
+    ServerName          ${DOMAINNAME}
+    DocumentRoot /home/${USERNAME}/${PUBLIC_DIR_NAME}
+
+    ServerAdmin webmaster@${DOMAINNAME}
+    ErrorLog <%= node['apache']['log_dir'] %>/${DOMAINNAME}-<%= node['magic3-env']['vhost_error_log'] %>
+    CustomLog <%= node['apache']['log_dir'] %>/${DOMAINNAME}-<%= node['magic3-env']['vhost_access_log'] %> combined
+
+    Alias /${TOOLS_DIR_NAME} "/home/${USERNAME}/${TOOLS_DIR_NAME}"
+</VirtualHost>
+<Directory "/home/${USERNAME}">
+php_admin_value open_basedir "/home/${USERNAME}/${PUBLIC_DIR_NAME}/:/home/${USERNAME}/${TOOLS_DIR_NAME}/:/tmp/"
+AllowOverride All
+Require all granted
+</Directory>
+#<VirtualHost *:443>
+#    ServerName          ${DOMAINNAME}
+#    DocumentRoot /home/${USERNAME}/${PUBLIC_DIR_NAME}
+#
+#    ServerAdmin webmaster@${DOMAINNAME}
+#    ErrorLog <%= node['apache']['log_dir'] %>/${DOMAINNAME}-<%= node['magic3-env']['ssl_error_log'] %>
+#    CustomLog <%= node['apache']['log_dir'] %>/${DOMAINNAME}-<%= node['magic3-env']['ssl_access_log'] %> combined
+#
+#  SSLEngine On
+#  SSLCertificateFile <%= node['apache']['dir'] %>/ssl/---/<%= node['magic3-env']['ssl_crt_filename'] %>
+#  SSLCertificateKeyFile <%= node['apache']['dir'] %>/ssl/---/<%= node['magic3-env']['ssl_server_key_filename'] %>
+#</VirtualHost>
+_EOT_
+
+fi
+
+# ホストを公開
+/usr/sbin/a2ensite vhost-${DOMAINNAME}
+
+echo "バーチャルホストの設定ファイル作成しました"
+echo "Apacheに反映します"
+
+/usr/sbin/apachectl -t >&/dev/null
+if [ "$?" -eq 0 ] ; then
+    echo "バーチャルホストの設定はOKです"
+    /usr/sbin/apachectl graceful >&/dev/null
+    echo "設定を反映しました"
+fi
+
+#
+# DB作成
+#
+mysql --host=localhost --user=${DB_ROOT_USER} --password=${DB_ROOT_PWD} << _END_
+CREATE USER ${DB_USER}@localhost IDENTIFIED BY '${DB_PWD}';
+GRANT USAGE ON *.* TO ${DB_USER}@localhost IDENTIFIED BY '${DB_PWD}' WITH MAX_QUERIES_PER_HOUR 0 MAX_CONNECTIONS_PER_HOUR 0 MAX_UPDATES_PER_HOUR 0 MAX_USER_CONNECTIONS 0;
+CREATE DATABASE IF NOT EXISTS ${DB_NAME} DEFAULT CHARACTER SET utf8 COLLATE utf8_unicode_ci;
+GRANT ALL PRIVILEGES ON \`${DB_NAME2}\`.* TO ${DB_USER}@localhost;
+_END_
+echo "DB作成しました"
+
+#登録完了です
+cat << _EOT_
+ドメイン作成完了しました
+New Site Info ===========================
+
+Server IP        : ${IP_ADDRESS}
+URL              : http://${DOMAINNAME}
+DB Name          : ${DB_NAME}
+DB User          : ${DB_USER}
+DB Password      : ${DB_PWD}
+-----------------------------------------
+HostId           : ${USERNAME}
+HostName         : ${DOMAINNAME}
+
+=========================================
+_EOT_
+
+# メール送信
+if [ -z "${MAILTOUSER}" ] ; then
+    param="${MAILTO}"
+else
+    param="-b ${MAILTO} ${MAILTOUSER}"
+fi
+if [ "$ADMIN_SERVER_MODE" = "true" ] ; then
+domainmark="*"
+	
+mail -s "${SUBJECT} - $domainmark${DOMAINNAME}" $param <<EOT
+New Site Info ===========================
+
+Server IP        : ${IP_ADDRESS}
+URL              : http://${DOMAINNAME}
+DB Name          : ${DB_NAME}
+DB User          : ${DB_USER}
+DB Password      : ${DB_PWD}
+Server Tool User : ${SERVER_TOOLS_USER}
+Server Tool Pwd  : ${SERVER_TOOLS_PWD}
+-----------------------------------------
+HostId           : ${USERNAME}
+HostName         : ${DOMAINNAME}
+
+=========================================
+EOT
+
+else
+
+mail -s "${SUBJECT} - $domainmark${DOMAINNAME}" $param <<EOT
+New Site Info ===========================
+
+Server IP        : ${IP_ADDRESS}
+URL              : http://${DOMAINNAME}
+DB Name          : ${DB_NAME}
+DB User          : ${DB_USER}
+DB Password      : ${DB_PWD}
+-----------------------------------------
+HostId           : ${USERNAME}
+HostName         : ${DOMAINNAME}
+
+=========================================
+EOT
+
+fi
+
+exit 0

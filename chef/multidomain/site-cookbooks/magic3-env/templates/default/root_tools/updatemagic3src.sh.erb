@@ -1,0 +1,60 @@
+#!/bin/bash
+#
+# 新規インストール用のMagic3ソース更新スクリプトver.1.0
+# 更新：2014/10/20
+#
+# 履歴
+#************************************************************
+
+# コマンドが0以外で終了した場合、即座にスクリプトを終了
+set -e
+
+#****************************************************
+#
+# 変数宣言
+#
+#****************************************************
+GITHUB_USER="magic3org"
+GITHUB_REPO="magic3"
+MAGIC3_ARC_DIR="<%= node['magic3-env']['magic3_arc_dir'] %>"
+MAGIC3_SRC_VER_FILE="<%= node['magic3-env']['magic3_var_dir'] %>/src_version"
+FILENAME_HEAD="magic3_"
+
+# 実行ユーザチェック
+USERID=`id | sed 's/uid=\([0-9]*\)(.*/\1/'`
+if [ $USERID -ne 0 ]
+then
+    echo "エラー: rootユーザ以外では実行できません"
+    exit 1
+fi
+
+# 最新版のバージョンを取得
+url=`curl -s "https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/tags" | grep "tarball_url" | \
+    sed -n '/[ \t]*"tarball_url"/p' | head -n 1 | \
+    sed -e 's/[ \t]*".*":[ \t]*"\(.*\)".*/\1/'`
+version=`basename $url | sed -e 's/v\([0-9\.]*\)/\1/'`
+filename=${FILENAME_HEAD}${version}.tar.gz
+
+# 解凍先ディレクトリに移動
+cd ${MAGIC3_ARC_DIR}
+savefilelist=`ls -1`
+
+# ソースをダウンロード
+echo "最新ソースダウンロード開始"
+curl -s -o ${MAGIC3_ARC_DIR}/$filename -L $url
+echo "ダウンロード完了"
+echo ${MAGIC3_ARC_DIR}/$filename
+
+# バージョン番号更新
+echo $version > ${MAGIC3_SRC_VER_FILE}
+
+#旧ファイルを削除
+for file in $savefilelist; do
+    if [ ${file} != ${filename} ]
+    then
+        rm -f "${file}"
+    fi
+done
+
+echo "バージョン"$version"に更新しました"
+exit 0

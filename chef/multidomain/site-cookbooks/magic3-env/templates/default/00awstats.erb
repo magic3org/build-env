@@ -1,0 +1,5 @@
+#!/bin/bash
+
+exec /usr/bin/awstats_updateall.pl now         -confdir="/etc"         -awstatsprog="<%= node['magic3-env']['awstats_dir'] %>/awstats.pl" >/dev/null
+
+exit 0
